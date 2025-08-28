@@ -12,9 +12,3 @@ A simple template for deploying an HTML website to GitHub Pages
 6. Go to repo **Settings -> Code and automation -> Actions -> General -> Workflow permissions -> Read and write permissions**.
 7. Go to repo **Settings -> Code and automation -> Pages -> Build and deployment -> Branch -> gh-pages -> Save**.
 8. The website will be deployed to your GitHub Pages repository. The URL should look like `https://username.github.io/gh-pages-html-template`.
-
-## References
-
-- https://openscience.gishub.org/open-results/
-- https://github.com/giswqs/gh-pages-html-template
-- https://www.youtube.com/live/X0LLFfkhQ2Y?si=mHhlunYel2ul40Ze&t=1979
