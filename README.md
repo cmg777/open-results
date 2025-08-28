@@ -16,4 +16,5 @@ A simple template for deploying an HTML website to GitHub Pages
 ## References
 
 - https://openscience.gishub.org/open-results/
+- https://github.com/giswqs/gh-pages-html-template
 - https://www.youtube.com/live/X0LLFfkhQ2Y?si=mHhlunYel2ul40Ze&t=1979
