@@ -1,385 +1,461 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Area } from 'recharts';
-import { Calculator, TrendingUp, Scale, BookOpen, Info, RefreshCcw, CheckCircle } from 'lucide-react';
-
-// --- Data Generation Helpers ---
-
-// Generate time series data
-const generateData = (impactMagnitude = 15) => {
-  const data = [];
-  for (let t = 1; t <= 20; t++) {
-    // Control Unit 1: Low growth, stable
-    const u1 = 10 + t * 1.2 + Math.sin(t) * 2;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Synthetic Control Explorer</title>
     
-    // Control Unit 2: High growth, volatile
-    const u2 = 15 + t * 3.5 + Math.cos(t * 1.5) * 5;
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
     
-    // Control Unit 3: Medium growth, slightly negative curve
-    const u3 = 25 + t * 1.5 - (t*t)/40;
-
-    // The Treated Unit (Constructed to be a mix of controls + noise + impact)
-    // Let's pretend the "True" counterfactual is 0.3*u1 + 0.5*u2 + 0.2*u3
-    const trueWeights = { w1: 0.3, w2: 0.5, w3: 0.2 };
-    let treatedBase = (u1 * trueWeights.w1) + (u2 * trueWeights.w2) + (u3 * trueWeights.w3);
+    <!-- React & ReactDOM (CDNJS) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     
-    // Add some noise
-    treatedBase += (Math.random() - 0.5) * 2;
-
-    // Intervention happens at t=15
-    let treated = treatedBase;
-    let impact = 0;
+    <!-- Prop Types (Required for Recharts) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"></script>
     
-    if (t >= 15) {
-      // Gradual impact
-      impact = impactMagnitude * ((t - 14) / 2); 
-      treated += impact;
-    }
+    <!-- Recharts (CDNJS - Stable Version) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.3/Recharts.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
 
-    data.push({
-      time: t,
-      u1, // Control 1
-      u2, // Control 2
-      u3, // Control 3
-      treated, // The unit that received the intervention
-      treatedBase, // The "unobservable" true counterfactual (for our reference, usually unknown)
-      impact // The true causal effect
-    });
-  }
-  return data;
-};
-
-const App = () => {
-  const [activeTab, setActiveTab] = useState('simulation');
-  const [weights, setWeights] = useState({ w1: 0.33, w2: 0.33, w3: 0.34 });
-  const [impactMagnitude, setImpactMagnitude] = useState(15);
-  const [data, setData] = useState([]);
-
-  // Initialize data on load
-  useEffect(() => {
-    setData(generateData(impactMagnitude));
-  }, [impactMagnitude]);
-
-  // Calculate Normalized Weights (Constraint: Sum must be 1)
-  const normalizedWeights = useMemo(() => {
-    const sum = weights.w1 + weights.w2 + weights.w3;
-    if (sum === 0) return { w1: 0, w2: 0, w3: 0 }; // Avoid division by zero
-    return {
-      w1: weights.w1 / sum,
-      w2: weights.w2 / sum,
-      w3: weights.w3 / sum
-    };
-  }, [weights]);
-
-  // Calculate Synthetic Line based on weights
-  const chartData = useMemo(() => {
-    return data.map(point => {
-      const syntheticVal = 
-        (point.u1 * normalizedWeights.w1) + 
-        (point.u2 * normalizedWeights.w2) + 
-        (point.u3 * normalizedWeights.w3);
-      
-      const error = Math.abs(point.treated - syntheticVal);
-      
-      return {
-        ...point,
-        synthetic: syntheticVal,
-        diff: point.treated - syntheticVal,
-        isPost: point.time >= 15
-      };
-    });
-  }, [data, normalizedWeights]);
-
-  // Calculate Pre-Intervention RMSPE (Root Mean Squared Prediction Error)
-  const rmspe = useMemo(() => {
-    const preInterventionData = chartData.filter(d => d.time < 15);
-    const sumSquaredError = preInterventionData.reduce((acc, curr) => {
-      return acc + Math.pow(curr.treated - curr.synthetic, 2);
-    }, 0);
-    return Math.sqrt(sumSquaredError / preInterventionData.length).toFixed(2);
-  }, [chartData]);
-
-  // Calculate Estimated Causal Effect (Average difference post-intervention)
-  const estimatedEffect = useMemo(() => {
-    const postInterventionData = chartData.filter(d => d.time >= 15);
-    const sumDiff = postInterventionData.reduce((acc, curr) => acc + curr.diff, 0);
-    return (sumDiff / postInterventionData.length).toFixed(2);
-  }, [chartData]);
-
-  const handleOptimize = () => {
-    // In a real app, this would run a quadratic programming solver.
-    // Here, we know the "secret" generation weights were roughly 0.3, 0.5, 0.2
-    // We'll animate towards them to simulate optimization.
-    setWeights({ w1: 0.3, w2: 0.5, w3: 0.2 });
-  };
-
-  const handleReset = () => {
-    setWeights({ w1: 0.5, w2: 0.5, w3: 0.5 });
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        /* Custom scrollbar for better aesthetics */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
         
-        {/* Header */}
-        <header className="mb-8 text-center md:text-left">
-          <h1 className="text-3xl md:text-4xl font-bold text-indigo-900 mb-2 flex items-center justify-center md:justify-start gap-3">
-            <Scale className="w-8 h-8 text-indigo-600" />
-            Synthetic Control Explorer
-          </h1>
-          <p className="text-slate-600 max-w-2xl">
-            An interactive tool to understand how weighted combinations of control units 
-            can estimate counterfactuals in causal inference.
-          </p>
-        </header>
-
-        {/* Navigation Tabs */}
-        <div className="flex gap-4 mb-6 border-b border-slate-200 overflow-x-auto">
-          <button 
-            onClick={() => setActiveTab('simulation')}
-            className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'simulation' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <TrendingUp className="w-4 h-4" /> Simulation Playground
-          </button>
-          <button 
-            onClick={() => setActiveTab('math')}
-            className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'math' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Calculator className="w-4 h-4" /> The Math
-          </button>
-          <button 
-            onClick={() => setActiveTab('concepts')}
-            className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'concepts' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <BookOpen className="w-4 h-4" /> Key Concepts
-          </button>
+        /* Loading spinner styles */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="root">
+        <div class="min-h-screen flex items-center justify-center flex-col">
+            <div class="loader"></div>
+            <p class="text-slate-500 mt-4">Loading libraries...</p>
         </div>
-
-        {/* Content Area */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Main Visualization (Always visible, but interaction varies) */}
-          <div className="lg:col-span-8 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold text-slate-800">Outcomes Over Time</h2>
-                <div className="flex gap-2 text-sm">
-                  <span className="flex items-center gap-1 text-slate-500">
-                    <span className="w-3 h-3 bg-blue-600 rounded-full"></span> Actual Treated
-                  </span>
-                  <span className="flex items-center gap-1 text-slate-500">
-                    <span className="w-3 h-3 border-2 border-dashed border-red-500 rounded-full"></span> Synthetic Control
-                  </span>
-                </div>
-              </div>
-
-              <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis 
-                      dataKey="time" 
-                      label={{ value: 'Time Periods', position: 'insideBottom', offset: -5 }} 
-                    />
-                    <YAxis label={{ value: 'Outcome (Y)', angle: -90, position: 'insideLeft' }} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                      labelFormatter={(label) => `Time Period: ${label}`}
-                    />
-                    
-                    {/* Intervention Line */}
-                    <ReferenceLine x={15} stroke="#64748b" strokeDasharray="3 3" label={{ value: "Intervention", position: 'insideTopLeft', fill: '#64748b' }} />
-                    
-                    {/* Background Control Units (Ghost lines) */}
-                    <Line type="monotone" dataKey="u1" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
-                    <Line type="monotone" dataKey="u2" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
-                    <Line type="monotone" dataKey="u3" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
-
-                    {/* Main Lines */}
-                    <Line type="monotone" dataKey="treated" stroke="#2563eb" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6 }} />
-                    <Line type="monotone" dataKey="synthetic" stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              
-              <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-100 flex flex-wrap gap-6 justify-center text-center">
-                <div>
-                  <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Pre-Intervention Fit (RMSPE)</div>
-                  <div className={`text-2xl font-bold ${rmspe < 2 ? 'text-green-600' : 'text-amber-600'}`}>
-                    {rmspe}
-                    {rmspe < 2 && <CheckCircle className="inline ml-2 w-5 h-5" />}
-                  </div>
-                  <div className="text-xs text-slate-400">Lower is better</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Estimated Causal Effect</div>
-                  <div className="text-2xl font-bold text-indigo-600">+{estimatedEffect}</div>
-                  <div className="text-xs text-slate-400">Avg post-intervention difference</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Dynamic Content based on Tabs */}
-            {activeTab === 'simulation' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-lg font-semibold mb-2">How to use this tool</h3>
-                <p className="text-slate-600 mb-4">
-                  The blue line is the <strong>Treated Unit</strong> (e.g., a state that passed a law). The grey lines are the <strong>Donor Pool</strong> (states that didn't).
-                  <br/>
-                  <span className="text-indigo-600 font-medium">Goal:</span> Adjust the weights of the donor states to make the red dashed line (Synthetic Control) perfectly overlap the blue line <em>before</em> the vertical intervention line.
-                </p>
-              </div>
-            )}
-
-            {activeTab === 'math' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-lg font-semibold mb-4">The Mathematical Framework</h3>
-                <div className="space-y-6 text-slate-700">
-                  
-                  <div className="p-4 bg-slate-50 rounded border border-slate-100">
-                    <h4 className="font-semibold text-indigo-800 mb-2">1. The Synthetic Estimator</h4>
-                    <p className="mb-2 text-sm">The synthetic control is defined as a weighted average of the units in the donor pool:</p>
-                    <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
-                      Y<sub>synthetic</sub>(t) = &Sigma; w<sub>j</sub> &times; Y<sub>j</sub>(t)
-                    </div>
-                    <p className="text-sm text-slate-500 mt-2">Where <em>w<sub>j</sub></em> is the weight assigned to control unit <em>j</em>.</p>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded border border-slate-100">
-                    <h4 className="font-semibold text-indigo-800 mb-2">2. Constraints</h4>
-                    <p className="mb-2 text-sm">The weights must sum to 1 and be non-negative. This ensures the synthetic control is an interpolation (convex hull) of the data, not an extrapolation.</p>
-                    <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
-                      &Sigma; w<sub>j</sub> = 1  &nbsp; and &nbsp;  w<sub>j</sub> &ge; 0
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded border border-slate-100">
-                    <h4 className="font-semibold text-indigo-800 mb-2">3. Optimization Objective</h4>
-                    <p className="mb-2 text-sm">We choose W* to minimize the distance between the treated unit X<sub>1</sub> and the synthetic unit X<sub>0</sub>W during the pre-intervention period:</p>
-                    <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
-                      min || X<sub>1</sub> - X<sub>0</sub>W ||
-                    </div>
-                    <p className="text-sm text-slate-500 mt-2">In this app, the "RMSPE" score represents this distance.</p>
-                  </div>
-
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'concepts' && (
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <h3 className="text-lg font-semibold mb-4">Key Concepts</h3>
-                <ul className="space-y-4">
-                  <li className="flex gap-3">
-                    <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><Scale className="w-5 h-5" /></div>
-                    <div>
-                      <h4 className="font-bold text-slate-800">The "Donor Pool"</h4>
-                      <p className="text-slate-600 text-sm">A collection of untreated units (e.g., other countries, states, or companies) that are similar to the treated unit but did not experience the intervention. Quality of the donor pool is critical.</p>
-                    </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><TrendingUp className="w-5 h-5" /></div>
-                    <div>
-                      <h4 className="font-bold text-slate-800">Parallel Trends vs. Synthetic Fit</h4>
-                      <p className="text-slate-600 text-sm">Difference-in-Differences (DiD) requires parallel trends. Synthetic Control relaxes this by constructing a unit that <em>matches</em> the trend, rather than just moving in parallel.</p>
-                    </div>
-                  </li>
-                  <li className="flex gap-3">
-                    <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><Info className="w-5 h-5" /></div>
-                    <div>
-                      <h4 className="font-bold text-slate-800">Inference (Placebo Tests)</h4>
-                      <p className="text-slate-600 text-sm">Since sample size is usually N=1 for the treatment, we calculate significance using "Placebo Tests". We pretend every control unit was treated and see if the effect we found is an outlier compared to the noise.</p>
-                    </div>
-                  </li>
-                </ul>
-              </div>
-            )}
-          </div>
-
-          {/* Sidebar Controls */}
-          <div className="lg:col-span-4 space-y-6">
-            
-            {/* Weight Controls */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-slate-800">Adjust Weights</h3>
-                <div className="flex gap-2">
-                   <button 
-                    onClick={handleOptimize}
-                    className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-full transition-colors flex items-center gap-1"
-                    title="Automatically find best weights"
-                  >
-                    <Calculator className="w-3 h-3" /> Auto-Optimize
-                  </button>
-                  <button 
-                    onClick={handleReset}
-                    className="text-slate-400 hover:text-slate-600"
-                    title="Reset Weights"
-                  >
-                    <RefreshCcw className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                {[
-                  { id: 'w1', label: 'Control Unit 1 (Stable)', color: 'bg-slate-300' },
-                  { id: 'w2', label: 'Control Unit 2 (Volatile)', color: 'bg-slate-400' },
-                  { id: 'w3', label: 'Control Unit 3 (Curved)', color: 'bg-slate-500' }
-                ].map((control) => (
-                  <div key={control.id}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium text-slate-700">{control.label}</span>
-                      <span className="font-mono text-slate-500">{(normalizedWeights[control.id] * 100).toFixed(1)}%</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={weights[control.id] * 100}
-                      onChange={(e) => setWeights({ ...weights, [control.id]: parseFloat(e.target.value) / 100 })}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-slate-100">
-                 <p className="text-xs text-slate-500 italic">
-                   Note: Weights are automatically normalized to sum to 100%.
-                 </p>
-              </div>
-            </div>
-
-            {/* Scenario Settings */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-              <h3 className="font-bold text-slate-800 mb-4">Scenario Settings</h3>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  True Intervention Effect Size
-                </label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="30" 
-                  value={impactMagnitude}
-                  onChange={(e) => setImpactMagnitude(Number(e.target.value))}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
-                <div className="flex justify-between text-xs text-slate-400 mt-1">
-                  <span>No Effect</span>
-                  <span>Large Effect</span>
-                </div>
-              </div>
-              <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-sm">
-                <p><strong>Challenge:</strong> Set the effect size to 0. Can you create a synthetic control that stays perfectly on the blue line for the entire 20 years?</p>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </div>
     </div>
-  );
-};
 
-export default App;
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // --- Icons (Inline SVG Components to replace Lucide) ---
+        const Scale = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></svg>
+        );
+        const TrendingUp = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        );
+        const Calculator = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></svg>
+        );
+        const BookOpen = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        );
+        const Info = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        );
+        const RefreshCcw = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+        );
+        const CheckCircle = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        );
+
+        // --- Data Generation Logic ---
+        const generateData = (impactMagnitude = 15) => {
+            const data = [];
+            for (let t = 1; t <= 20; t++) {
+                // Control Unit 1: Low growth, stable
+                const u1 = 10 + t * 1.2 + Math.sin(t) * 2;
+                // Control Unit 2: High growth, volatile
+                const u2 = 15 + t * 3.5 + Math.cos(t * 1.5) * 5;
+                // Control Unit 3: Medium growth, slightly negative curve
+                const u3 = 25 + t * 1.5 - (t*t)/40;
+
+                // The Treated Unit (Constructed to be a mix of controls + noise + impact)
+                const trueWeights = { w1: 0.3, w2: 0.5, w3: 0.2 };
+                let treatedBase = (u1 * trueWeights.w1) + (u2 * trueWeights.w2) + (u3 * trueWeights.w3);
+                
+                // Add noise
+                treatedBase += (Math.random() - 0.5) * 2;
+
+                // Intervention happens at t=15
+                let treated = treatedBase;
+                let impact = 0;
+                
+                if (t >= 15) {
+                    impact = impactMagnitude * ((t - 14) / 2); 
+                    treated += impact;
+                }
+
+                data.push({
+                    time: t,
+                    u1, u2, u3,
+                    treated,
+                    treatedBase,
+                    impact
+                });
+            }
+            return data;
+        };
+
+        // --- Main Application Component ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('simulation');
+            const [weights, setWeights] = useState({ w1: 0.33, w2: 0.33, w3: 0.34 });
+            const [impactMagnitude, setImpactMagnitude] = useState(15);
+            const [data, setData] = useState([]);
+
+            // Get Recharts from window, which we guaranteed exists before mounting App
+            const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } = window.Recharts;
+
+            // Initialize data
+            useEffect(() => {
+                setData(generateData(impactMagnitude));
+            }, [impactMagnitude]);
+
+            // Normalize Weights
+            const normalizedWeights = useMemo(() => {
+                const sum = weights.w1 + weights.w2 + weights.w3;
+                if (sum === 0) return { w1: 0, w2: 0, w3: 0 };
+                return {
+                    w1: weights.w1 / sum,
+                    w2: weights.w2 / sum,
+                    w3: weights.w3 / sum
+                };
+            }, [weights]);
+
+            // Calculate Synthetic Line
+            const chartData = useMemo(() => {
+                return data.map(point => {
+                    const syntheticVal = 
+                        (point.u1 * normalizedWeights.w1) + 
+                        (point.u2 * normalizedWeights.w2) + 
+                        (point.u3 * normalizedWeights.w3);
+                    
+                    return {
+                        ...point,
+                        synthetic: syntheticVal,
+                        diff: point.treated - syntheticVal,
+                        isPost: point.time >= 15
+                    };
+                });
+            }, [data, normalizedWeights]);
+
+            // Calculate Metrics
+            const rmspe = useMemo(() => {
+                const preInterventionData = chartData.filter(d => d.time < 15);
+                const sumSquaredError = preInterventionData.reduce((acc, curr) => {
+                    return acc + Math.pow(curr.treated - curr.synthetic, 2);
+                }, 0);
+                return Math.sqrt(sumSquaredError / preInterventionData.length).toFixed(2);
+            }, [chartData]);
+
+            const estimatedEffect = useMemo(() => {
+                const postInterventionData = chartData.filter(d => d.time >= 15);
+                const sumDiff = postInterventionData.reduce((acc, curr) => acc + curr.diff, 0);
+                return (sumDiff / postInterventionData.length).toFixed(2);
+            }, [chartData]);
+
+            const handleOptimize = () => {
+                setWeights({ w1: 0.3, w2: 0.5, w3: 0.2 });
+            };
+
+            const handleReset = () => {
+                setWeights({ w1: 0.5, w2: 0.5, w3: 0.5 });
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 font-sans text-slate-800 p-4 md:p-8">
+                    <div className="max-w-6xl mx-auto">
+                        
+                        {/* Header */}
+                        <header className="mb-8 text-center md:text-left">
+                            <h1 className="text-3xl md:text-4xl font-bold text-indigo-900 mb-2 flex items-center justify-center md:justify-start gap-3">
+                                <Scale className="w-8 h-8 text-indigo-600" />
+                                Synthetic Control Explorer
+                            </h1>
+                            <p className="text-slate-600 max-w-2xl">
+                                An interactive tool to understand how weighted combinations of control units 
+                                can estimate counterfactuals in causal inference.
+                            </p>
+                        </header>
+
+                        {/* Navigation Tabs */}
+                        <div className="flex gap-4 mb-6 border-b border-slate-200 overflow-x-auto">
+                            <button 
+                                onClick={() => setActiveTab('simulation')}
+                                className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'simulation' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <TrendingUp className="w-4 h-4" /> Simulation Playground
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('math')}
+                                className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'math' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <Calculator className="w-4 h-4" /> The Math
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('concepts')}
+                                className={`pb-3 px-4 font-medium transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === 'concepts' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                            >
+                                <BookOpen className="w-4 h-4" /> Key Concepts
+                            </button>
+                        </div>
+
+                        {/* Content Area */}
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                            
+                            {/* Main Visualization */}
+                            <div className="lg:col-span-8 space-y-6">
+                                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h2 className="text-xl font-semibold text-slate-800">Outcomes Over Time</h2>
+                                        <div className="flex gap-2 text-sm flex-wrap">
+                                            <span className="flex items-center gap-1 text-slate-500">
+                                                <span className="w-3 h-3 bg-blue-600 rounded-full"></span> Actual Treated
+                                            </span>
+                                            <span className="flex items-center gap-1 text-slate-500">
+                                                <span className="w-3 h-3 border-2 border-dashed border-red-500 rounded-full"></span> Synthetic Control
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="h-80 w-full">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                                <XAxis 
+                                                    dataKey="time" 
+                                                    label={{ value: 'Time Periods', position: 'insideBottom', offset: -5 }} 
+                                                />
+                                                <YAxis label={{ value: 'Outcome (Y)', angle: -90, position: 'insideLeft' }} />
+                                                <Tooltip 
+                                                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                    labelFormatter={(label) => `Time Period: ${label}`}
+                                                />
+                                                
+                                                <ReferenceLine x={15} stroke="#64748b" strokeDasharray="3 3" label={{ value: "Intervention", position: 'insideTopLeft', fill: '#64748b' }} />
+                                                
+                                                <Line type="monotone" dataKey="u1" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
+                                                <Line type="monotone" dataKey="u2" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
+                                                <Line type="monotone" dataKey="u3" stroke="#cbd5e1" strokeWidth={1} dot={false} activeDot={false} />
+
+                                                <Line type="monotone" dataKey="treated" stroke="#2563eb" strokeWidth={3} dot={{ r: 3 }} activeDot={{ r: 6 }} />
+                                                <Line type="monotone" dataKey="synthetic" stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={false} />
+                                            </LineChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    
+                                    <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-100 flex flex-wrap gap-6 justify-center text-center">
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Pre-Intervention Fit (RMSPE)</div>
+                                            <div className={`text-2xl font-bold ${rmspe < 2 ? 'text-green-600' : 'text-amber-600'}`}>
+                                                {rmspe}
+                                                {rmspe < 2 && <CheckCircle className="inline ml-2 w-5 h-5" />}
+                                            </div>
+                                            <div className="text-xs text-slate-400">Lower is better</div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Estimated Causal Effect</div>
+                                            <div className="text-2xl font-bold text-indigo-600">+{estimatedEffect}</div>
+                                            <div className="text-xs text-slate-400">Avg post-intervention difference</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Tab Content */}
+                                {activeTab === 'simulation' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                        <h3 className="text-lg font-semibold mb-2">How to use this tool</h3>
+                                        <p className="text-slate-600 mb-4">
+                                            The blue line is the <strong>Treated Unit</strong> (e.g., a state that passed a law). The grey lines are the <strong>Donor Pool</strong> (states that didn't).
+                                            <br/>
+                                            <span className="text-indigo-600 font-medium">Goal:</span> Adjust the weights of the donor states to make the red dashed line (Synthetic Control) perfectly overlap the blue line <em>before</em> the vertical intervention line.
+                                        </p>
+                                    </div>
+                                )}
+
+                                {activeTab === 'math' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                        <h3 className="text-lg font-semibold mb-4">The Mathematical Framework</h3>
+                                        <div className="space-y-6 text-slate-700">
+                                            <div className="p-4 bg-slate-50 rounded border border-slate-100">
+                                                <h4 className="font-semibold text-indigo-800 mb-2">1. The Synthetic Estimator</h4>
+                                                <p className="mb-2 text-sm">The synthetic control is defined as a weighted average of the units in the donor pool:</p>
+                                                <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
+                                                    Y<sub>synthetic</sub>(t) = &Sigma; w<sub>j</sub> &times; Y<sub>j</sub>(t)
+                                                </div>
+                                                <p className="text-sm text-slate-500 mt-2">Where <em>w<sub>j</sub></em> is the weight assigned to control unit <em>j</em>.</p>
+                                            </div>
+                                            <div className="p-4 bg-slate-50 rounded border border-slate-100">
+                                                <h4 className="font-semibold text-indigo-800 mb-2">2. Constraints</h4>
+                                                <p className="mb-2 text-sm">Weights must sum to 1 and be non-negative. This ensures the synthetic control is an interpolation (convex hull).</p>
+                                                <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
+                                                    &Sigma; w<sub>j</sub> = 1  &nbsp; and &nbsp;  w<sub>j</sub> &ge; 0
+                                                </div>
+                                            </div>
+                                            <div className="p-4 bg-slate-50 rounded border border-slate-100">
+                                                <h4 className="font-semibold text-indigo-800 mb-2">3. Optimization Objective</h4>
+                                                <p className="mb-2 text-sm">We choose weights to minimize the distance between Treated and Synthetic during the pre-intervention period:</p>
+                                                <div className="font-mono bg-white p-3 rounded shadow-inner text-center text-lg">
+                                                    min || X<sub>1</sub> - X<sub>0</sub>W ||
+                                                </div>
+                                                <p className="text-sm text-slate-500 mt-2">In this app, "RMSPE" represents this distance.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'concepts' && (
+                                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                                        <h3 className="text-lg font-semibold mb-4">Key Concepts</h3>
+                                        <ul className="space-y-4">
+                                            <li className="flex gap-3">
+                                                <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><Scale className="w-5 h-5" /></div>
+                                                <div>
+                                                    <h4 className="font-bold text-slate-800">The "Donor Pool"</h4>
+                                                    <p className="text-slate-600 text-sm">A collection of untreated units (e.g., other countries, states) similar to the treated unit. Quality of the donor pool is critical.</p>
+                                                </div>
+                                            </li>
+                                            <li className="flex gap-3">
+                                                <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><TrendingUp className="w-5 h-5" /></div>
+                                                <div>
+                                                    <h4 className="font-bold text-slate-800">Parallel Trends vs. Synthetic Fit</h4>
+                                                    <p className="text-slate-600 text-sm">DiD requires parallel trends. Synthetic Control relaxes this by constructing a unit that <em>matches</em> the trend.</p>
+                                                </div>
+                                            </li>
+                                            <li className="flex gap-3">
+                                                <div className="mt-1 bg-indigo-100 p-2 rounded-lg h-fit text-indigo-600"><Info className="w-5 h-5" /></div>
+                                                <div>
+                                                    <h4 className="font-bold text-slate-800">Inference (Placebo Tests)</h4>
+                                                    <p className="text-slate-600 text-sm">Since N=1 for treatment, we calculate significance using "Placebo Tests" by pretending control units were treated.</p>
+                                                </div>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Sidebar Controls */}
+                            <div className="lg:col-span-4 space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="font-bold text-slate-800">Adjust Weights</h3>
+                                        <div className="flex gap-2">
+                                           <button 
+                                                onClick={handleOptimize}
+                                                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-full transition-colors flex items-center gap-1"
+                                                title="Automatically find best weights"
+                                            >
+                                                <Calculator className="w-3 h-3" /> Auto-Optimize
+                                            </button>
+                                            <button 
+                                                onClick={handleReset}
+                                                className="text-slate-400 hover:text-slate-600"
+                                                title="Reset Weights"
+                                            >
+                                                <RefreshCcw className="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        {[
+                                            { id: 'w1', label: 'Control Unit 1 (Stable)', color: 'bg-slate-300' },
+                                            { id: 'w2', label: 'Control Unit 2 (Volatile)', color: 'bg-slate-400' },
+                                            { id: 'w3', label: 'Control Unit 3 (Curved)', color: 'bg-slate-500' }
+                                        ].map((control) => (
+                                            <div key={control.id}>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="font-medium text-slate-700">{control.label}</span>
+                                                    <span className="font-mono text-slate-500">{(normalizedWeights[control.id] * 100).toFixed(1)}%</span>
+                                                </div>
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="100"
+                                                    value={weights[control.id] * 100}
+                                                    onChange={(e) => setWeights({ ...weights, [control.id]: parseFloat(e.target.value) / 100 })}
+                                                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="mt-6 pt-4 border-t border-slate-100">
+                                         <p className="text-xs text-slate-500 italic">
+                                             Note: Weights are automatically normalized to sum to 100%.
+                                         </p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 className="font-bold text-slate-800 mb-4">Scenario Settings</h3>
+                                    <div className="mb-4">
+                                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                                            True Intervention Effect Size
+                                        </label>
+                                        <input 
+                                            type="range" 
+                                            min="0" 
+                                            max="30" 
+                                            value={impactMagnitude}
+                                            onChange={(e) => setImpactMagnitude(Number(e.target.value))}
+                                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                        />
+                                        <div className="flex justify-between text-xs text-slate-400 mt-1">
+                                            <span>No Effect</span>
+                                            <span>Large Effect</span>
+                                        </div>
+                                    </div>
+                                    <div className="p-3 bg-blue-50 text-blue-800 rounded-lg text-sm">
+                                        <p><strong>Challenge:</strong> Set the effect size to 0. Can you create a synthetic control that stays perfectly on the blue line for the entire 20 years?</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Initialization Logic (Polling for Libraries) ---
+        const startApp = () => {
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<App />);
+        };
+
+        const checkLibraries = () => {
+            // Check if critical libraries are attached to window
+            if (window.Recharts && window.React && window.ReactDOM) {
+                startApp();
+            } else {
+                // Poll again in 100ms
+                setTimeout(checkLibraries, 100);
+            }
+        };
+
+        // Start polling
+        checkLibraries();
+    </script>
+</body>
+</html>
